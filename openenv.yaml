@@ -1,0 +1,75 @@
+name: datacleanenv
+version: "1.0.0"
+description: >
+  A real-world data cleaning RL environment where an AI agent detects
+  and fixes common data quality issues in tabular datasets including
+  missing values, duplicate rows, wrong data types, and invalid values.
+
+author: Jambu Mohammed Hamdan
+tags:
+  - openenv
+  - data-cleaning
+  - real-world
+  - tabular-data
+
+tasks:
+  - id: easy
+    description: "Fix 2 missing values in a small employee table."
+    difficulty: easy
+    max_steps: 30
+    min_score: 0.0
+    max_score: 1.0
+
+  - id: medium
+    description: "Fix missing values AND remove a duplicate row in a sales table."
+    difficulty: medium
+    max_steps: 30
+    min_score: 0.0
+    max_score: 1.0
+
+  - id: hard
+    description: "Fix missing values, a duplicate, wrong data types, and invalid values in a patient records table."
+    difficulty: hard
+    max_steps: 30
+    min_score: 0.0
+    max_score: 1.0
+
+action_space:
+  type: discrete_typed
+  actions:
+    - fill_missing
+    - fix_type
+    - remove_duplicate
+    - fix_value
+    - done
+
+observation_space:
+  task_id: string
+  step: integer
+  current_table: list_of_dicts
+  issues_remaining: integer
+  last_action_result: string
+  done: boolean
+
+reward:
+  type: shaped
+  range: [-0.05, 0.35]
+  description: >
+    +0.3 for each correctly fixed issue, +0.1 for partial fix,
+    +0.2 bonus for resolving all issues, -0.05 for invalid actions.
+
+api:
+  reset: POST /reset?task_id=<easy|medium|hard>
+  step:  POST /step   (body: Action JSON)
+  state: GET  /state
+  tasks: GET  /tasks
+
+baseline_scores:
+  easy:   0.85
+  medium: 0.70
+  hard:   0.55
+
+docker:
+  port: 7860
+  build: "docker build -t datacleanenv ."
+  run:   "docker run -p 7860:7860 datacleanenv"
