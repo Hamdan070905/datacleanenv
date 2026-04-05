@@ -1,11 +1,7 @@
-"""
-FastAPI application for the DataCleanEnv Environment.
-"""
-
 try:
     from openenv.core.env_server.http_server import create_app
 except Exception as e:
-    raise ImportError("openenv is required. Install with: pip install openenv-core") from e
+    raise ImportError("openenv is required.") from e
 
 try:
     from ..models import DataCleanAction, DataCleanObservation
