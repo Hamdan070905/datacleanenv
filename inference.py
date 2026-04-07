@@ -137,13 +137,20 @@ def run_episode(task_id: str) -> dict:
         if done:
             break
 
-    success = obs.get("issues_remaining", 1) == 0
+    issues_remaining = obs.get("issues_remaining", 1)
+    success = issues_remaining == 0
+
+    # Score must be strictly in (0, 1) — clamp away from 0.0 and 1.0
+    total_reward = sum(rewards)
+    raw_score = total_reward / max(len(rewards), 1)
+    score = max(0.001, min(0.999, raw_score))
+
     success_str = "true" if success else "false"
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
 
-    print(f"[END] success={success_str} steps={len(rewards)} rewards={rewards_str}")
+    print(f"[END] success={success_str} steps={len(rewards)} rewards={rewards_str} score={score:.4f}")
 
-    return {"task_id": task_id, "success": success, "steps": len(rewards), "rewards": rewards}
+    return {"task_id": task_id, "success": success, "steps": len(rewards), "rewards": rewards, "score": score}
 
 
 if __name__ == "__main__":
