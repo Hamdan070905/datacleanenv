@@ -1,10 +1,7 @@
 """
-inference.py — Baseline inference script for DataCleanEnv.
-Uses OpenAI client pointed at HuggingFace Inference API (free).
-Output format strictly follows OpenEnv spec:
-  [START] task=<task_name> env=<benchmark> model=<model_name>
-  [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-  [END]   success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+inference.py - Baseline inference script for DataCleanEnv.
+Uses OpenAI client pointed at HuggingFace router API.
+Output format follows OpenEnv spec.
 """
 
 import os
@@ -12,7 +9,7 @@ import json
 import requests
 from openai import OpenAI
 
-# ── Environment variables ────────────────────────────────────────────────────
+# Environment variables
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.getenv("HF_TOKEN")
@@ -21,38 +18,37 @@ ENV_URL      = os.getenv("ENV_URL",      "http://localhost:7860")
 if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
 
-# ── OpenAI-compatible client pointed at HuggingFace ──────────────────────────
-client = OpenAI(
-    base_url=API_BASE_URL,
-    api_key=HF_TOKEN
-)
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 def env_reset(task_id: str) -> dict:
-    r = requests.post(f"{ENV_URL}/reset", params={"task_id": task_id})
+    r = requests.post(f"{ENV_URL}/reset",
+                      json={"task_id": task_id},
+                      headers={"Content-Type": "application/json"})
     r.raise_for_status()
-    return r.json()
+    data = r.json()
+    # openenv-core wraps in {"observation": {...}, "reward": ..., "done": ...}
+    if "observation" in data:
+        return data["observation"]
+    return data
 
 def env_step(action: dict) -> dict:
-    r = requests.post(f"{ENV_URL}/step", json=action)
-    r.raise_for_status()
-    return r.json()
-
-def env_state() -> dict:
-    r = requests.get(f"{ENV_URL}/state")
+    r = requests.post(f"{ENV_URL}/step",
+                      json=action,
+                      headers={"Content-Type": "application/json"})
     r.raise_for_status()
     return r.json()
 
 def build_prompt(obs: dict) -> str:
-    table_str = json.dumps(obs["current_table"], indent=2)
+    table_str = json.dumps(obs.get("current_table", []), indent=2)
+    issues_remaining = obs.get("issues_remaining", 0)
+    last_result = obs.get("last_action_result", "")
     return f"""You are a data cleaning agent. Fix data quality issues in this table.
 
 Current table:
 {table_str}
 
-Issues remaining: {obs['issues_remaining']}
-Last action result: {obs['last_action_result']}
+Issues remaining: {issues_remaining}
+Last action result: {last_result}
 
 Respond with EXACTLY one JSON object, no extra text:
 
@@ -87,7 +83,7 @@ def call_llm(prompt: str) -> str:
             max_tokens=200,
         )
         return response.choices[0].message.content.strip()
-    except Exception as e:
+    except Exception:
         return '{"action_type": "done"}'
 
 def parse_action(raw: str) -> dict:
@@ -97,8 +93,6 @@ def parse_action(raw: str) -> dict:
     except Exception:
         return {"action_type": "done"}
 
-# ── Main episode runner ───────────────────────────────────────────────────────
-
 def run_episode(task_id: str) -> dict:
     obs = env_reset(task_id)
     rewards = []
@@ -107,38 +101,43 @@ def run_episode(task_id: str) -> dict:
     print(f"[START] task={task_id} env=datacleanenv model={MODEL_NAME}")
 
     for step_num in range(1, MAX_STEPS + 1):
-        if obs.get("done"):
+        if obs.get("done", False):
             break
 
-        prompt = build_prompt(obs)
-        raw_action = call_llm(prompt)
-        action_dict = parse_action(raw_action)
-        action_str = json.dumps(action_dict).replace(" ", "")
-
         try:
+            prompt = build_prompt(obs)
+            raw_action = call_llm(prompt)
+            action_dict = parse_action(raw_action)
+            action_str = json.dumps(action_dict).replace(" ", "")
+
             result = env_step(action_dict)
-            reward = result["reward"]["value"]
-            done   = result["done"]
-            obs    = result["observation"]
-            error  = result["info"].get("error", "null") or "null"
+
+            # Handle openenv-core response format
+            if "observation" in result:
+                obs = result["observation"]
+                reward = result.get("reward", 0.0) or 0.0
+                done = result.get("done", False)
+            else:
+                obs = result
+                reward = obs.get("reward", 0.0) or 0.0
+                done = obs.get("done", False)
+
+            error = "null"
         except Exception as e:
             reward = 0.0
-            done   = False
-            error  = str(e)
+            done = False
+            error = str(e)[:100]
+            action_str = '{"action_type":"done"}'
 
-        rewards.append(reward)
-        done_str  = "true" if done else "false"
-        error_str = error if error and error != "null" else "null"
+        rewards.append(float(reward))
+        done_str = "true" if done else "false"
 
-        print(
-            f"[STEP] step={step_num} action={action_str} "
-            f"reward={reward:.2f} done={done_str} error={error_str}"
-        )
+        print(f"[STEP] step={step_num} action={action_str} reward={float(reward):.2f} done={done_str} error={error}")
 
         if done:
             break
 
-    success     = obs.get("issues_remaining", 1) == 0
+    success = obs.get("issues_remaining", 1) == 0
     success_str = "true" if success else "false"
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
 
@@ -147,21 +146,22 @@ def run_episode(task_id: str) -> dict:
     return {"task_id": task_id, "success": success, "steps": len(rewards), "rewards": rewards}
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
-    tasks   = ["easy", "medium", "hard"]
+    tasks = ["easy", "medium", "hard"]
     results = []
 
     for tid in tasks:
-        res = run_episode(tid)
-        results.append(res)
+        try:
+            res = run_episode(tid)
+            results.append(res)
+        except Exception as e:
+            print(f"[END] success=false steps=0 rewards=0.00")
+            print(f"Error in task {tid}: {e}")
         print()
 
     print("=" * 50)
     print("BASELINE SCORES SUMMARY")
     print("=" * 50)
     for r in results:
-        total_reward = sum(r["rewards"])
-        print(f"Task: {r['task_id']:8s} | Steps: {r['steps']:3d} | "
-              f"Success: {str(r['success']):5s} | Total Reward: {total_reward:.2f}")
+        total = sum(r["rewards"])
+        print(f"Task: {r['task_id']:8s} | Steps: {r['steps']:3d} | Success: {str(r['success']):5s} | Total Reward: {total:.2f}")
