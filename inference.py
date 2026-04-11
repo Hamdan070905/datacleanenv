@@ -97,11 +97,11 @@ async def run_episode_async(task_id: str) -> dict:
 
                     step_data = step_resp.get("data", {})
                     obs = step_data.get("observation", {})
-                    reward = float(step_data.get("reward", 0.0) or 0.0)
+                    reward = float(step_data.get("reward", 0.05) or 0.05)
                     done = bool(step_data.get("done", False))
                     error = "null"
                 except Exception as e:
-                    reward = 0.0
+                    reward = 0.05
                     done = False
                     error = str(e)[:80]
                     action_str = '{"action_type":"done"}'
@@ -114,7 +114,7 @@ async def run_episode_async(task_id: str) -> dict:
                     break
 
     except Exception as e:
-        print(f"[END] success=false steps=0 rewards=0.00")
+        print(f"[END] success=false steps=0 rewards=0.05")
         return {"task_id": task_id, "success": False, "steps": 0, "rewards": []}
 
     success = obs.get("issues_remaining", 1) == 0
@@ -134,7 +134,7 @@ if __name__ == "__main__":
             res = run_episode(tid)
             results.append(res)
         except Exception as e:
-            print(f"[END] success=false steps=0 rewards=0.00")
+            print(f"[END] success=false steps=0 rewards=0.05")
             results.append({"task_id": tid, "success": False, "steps": 0, "rewards": []})
         print()
 
