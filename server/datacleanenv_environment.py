@@ -109,7 +109,7 @@ class DataCleanEnvironment(Environment):
 
         self.step_count += 1
         self._state.step_count = self.step_count
-        reward_val = 0.05
+        reward_val = 0.02
 
         if action.action_type == "done":
             self._done = True
@@ -128,7 +128,7 @@ class DataCleanEnvironment(Environment):
 
         if len(self.fixed_issues) == len(self.original_issues):
             self._done = True
-            reward_val += 0.15
+            reward_val += 0.05
 
         if self.step_count >= self.MAX_STEPS:
             self._done = True
@@ -153,7 +153,7 @@ class DataCleanEnvironment(Environment):
             issues_remaining=len(self.original_issues) - len(self.fixed_issues),
             last_action_result=self.last_action_result,
             done=self._done,
-            reward=0.05,
+            reward=0.02,
         )
 
     def _issue_key(self, issue):
@@ -174,10 +174,10 @@ class DataCleanEnvironment(Environment):
                 self.fixed_issues.add(key)
                 if action.new_value == issue["correct_value"]:
                     self.last_action_result = f"fill_missing:correct:{action.column}"
-                    return 0.35
+                    return 0.15
                 else:
                     self.last_action_result = f"fill_missing:partial:{action.column}"
-                    return 0.15
+                    return 0.05
         self.last_action_result = "fill_missing:no_match"
         return 0.02
 
@@ -195,10 +195,10 @@ class DataCleanEnvironment(Environment):
                 self.fixed_issues.add(key)
                 if action.new_value == issue["correct_value"]:
                     self.last_action_result = f"fix_type:correct:{action.column}"
-                    return 0.35
+                    return 0.15
                 else:
                     self.last_action_result = f"fix_type:partial:{action.column}"
-                    return 0.15
+                    return 0.05
         self.last_action_result = "fix_type:no_match"
         return 0.02
 
@@ -217,7 +217,7 @@ class DataCleanEnvironment(Environment):
                         other["row_index"] -= 1
                 self.fixed_issues.add(key)
                 self.last_action_result = f"remove_duplicate:correct:{action.row_index}"
-                return 0.35
+                return 0.15
         self.last_action_result = "remove_duplicate:no_match"
         return 0.02
 
@@ -235,9 +235,9 @@ class DataCleanEnvironment(Environment):
                 self.fixed_issues.add(key)
                 if action.new_value == issue["correct_value"]:
                     self.last_action_result = f"fix_value:correct:{action.column}"
-                    return 0.35
+                    return 0.15
                 else:
                     self.last_action_result = f"fix_value:partial:{action.column}"
-                    return 0.15
+                    return 0.05
         self.last_action_result = "fix_value:no_match"
         return 0.02
