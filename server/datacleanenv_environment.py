@@ -1,8 +1,5 @@
 """
-DataCleanEnv Environment Implementation.
-
-A real-world data cleaning RL environment where an AI agent detects
-and fixes common data quality issues in tabular datasets.
+DataCleanEnv Environment Implementation (FIXED for Phase 2).
 """
 
 import copy
@@ -16,18 +13,12 @@ except ImportError:
     from models import DataCleanAction, DataCleanObservation
 
 
+# ✅ CLAMP FUNCTION (MANDATORY)
+def clamp_reward(r):
+    return max(0.01, min(0.99, float(r)))
+
+
 class DataCleanEnvironment(Environment):
-    """
-    A real-world data cleaning RL environment.
-
-    The agent must detect and fix data quality issues:
-    - Missing values (None/null)
-    - Duplicate rows
-    - Wrong data types
-    - Invalid values
-
-    Three tasks of increasing difficulty: easy -> medium -> hard.
-    """
 
     SUPPORTS_CONCURRENT_SESSIONS: bool = True
     MAX_STEPS = 30
@@ -88,12 +79,14 @@ class DataCleanEnvironment(Environment):
         self.last_action_result = "none"
         self._state = State(episode_id=str(uuid4()), step_count=0)
 
-    def reset(self, seed=None, episode_id=None, **kwargs) -> DataCleanObservation:
+    def reset(self, seed=None, episode_id=None, **kwargs):
         task_id = kwargs.get("task_id", "easy")
         if task_id not in self.DATASETS:
             task_id = "easy"
+
         self.task_id = task_id
         dataset = self.DATASETS[task_id]
+
         self.table = copy.deepcopy(dataset["table"])
         self.original_issues = copy.deepcopy(dataset["issues"])
         self.fixed_issues = set()
@@ -101,51 +94,64 @@ class DataCleanEnvironment(Environment):
         self._done = False
         self.last_action_result = "reset"
         self._state = State(episode_id=str(uuid4()), step_count=0)
+
         return self._observe()
 
-    def step(self, action: DataCleanAction, timeout_s=None, **kwargs) -> DataCleanObservation:
+    def step(self, action: DataCleanAction, timeout_s=None, **kwargs):
+
         if self._done:
             return self._observe()
 
         self.step_count += 1
         self._state.step_count = self.step_count
-        reward_val = 0.02
+
+        reward_val = 0.02  # safe default
 
         if action.action_type == "done":
             self._done = True
             self.last_action_result = "agent_declared_done"
+
         elif action.action_type == "fill_missing":
             reward_val = self._apply_fill_missing(action)
+
         elif action.action_type == "fix_type":
             reward_val = self._apply_fix_type(action)
+
         elif action.action_type == "remove_duplicate":
             reward_val = self._apply_remove_duplicate(action)
+
         elif action.action_type == "fix_value":
             reward_val = self._apply_fix_value(action)
+
         else:
             self.last_action_result = "unknown_action"
             reward_val = 0.02
 
+        # ✅ Completion bonus (SAFE)
         if len(self.fixed_issues) == len(self.original_issues):
             self._done = True
-            reward_val += 0.05
+            reward_val = min(reward_val + 0.05, 0.99)
 
         if self.step_count >= self.MAX_STEPS:
             self._done = True
 
+        # ✅ FINAL CLAMP (CRITICAL)
+        reward_val = clamp_reward(reward_val)
+
         obs = self._observe()
         obs.reward = round(reward_val, 2)
         obs.done = self._done
+
         return obs
 
     @property
-    def state(self) -> State:
+    def state(self):
         return self._state
 
     def close(self):
         pass
 
-    def _observe(self) -> DataCleanObservation:
+    def _observe(self):
         return DataCleanObservation(
             task_id=self.task_id,
             step=self.step_count,
@@ -162,82 +168,77 @@ class DataCleanEnvironment(Environment):
     def _apply_fill_missing(self, action):
         for issue in self.original_issues:
             key = self._issue_key(issue)
+
             if (issue["type"] == "fill_missing"
-                    and issue["row_index"] == action.row_index
-                    and issue["column"] == action.column
-                    and key not in self.fixed_issues):
+                and issue["row_index"] == action.row_index
+                and issue["column"] == action.column
+                and key not in self.fixed_issues):
+
                 try:
                     self.table[action.row_index][action.column] = action.new_value
-                except (IndexError, KeyError):
-                    self.last_action_result = "invalid_index"
+                except:
                     return 0.02
+
                 self.fixed_issues.add(key)
-                if action.new_value == issue["correct_value"]:
-                    self.last_action_result = f"fill_missing:correct:{action.column}"
-                    return 0.15
-                else:
-                    self.last_action_result = f"fill_missing:partial:{action.column}"
-                    return 0.05
-        self.last_action_result = "fill_missing:no_match"
+
+                return 0.15 if action.new_value == issue["correct_value"] else 0.05
+
         return 0.02
 
     def _apply_fix_type(self, action):
         for issue in self.original_issues:
             key = self._issue_key(issue)
+
             if (issue["type"] == "fix_type"
-                    and issue["row_index"] == action.row_index
-                    and issue["column"] == action.column
-                    and key not in self.fixed_issues):
+                and issue["row_index"] == action.row_index
+                and issue["column"] == action.column
+                and key not in self.fixed_issues):
+
                 try:
                     self.table[action.row_index][action.column] = action.new_value
-                except (IndexError, KeyError):
+                except:
                     return 0.02
+
                 self.fixed_issues.add(key)
-                if action.new_value == issue["correct_value"]:
-                    self.last_action_result = f"fix_type:correct:{action.column}"
-                    return 0.15
-                else:
-                    self.last_action_result = f"fix_type:partial:{action.column}"
-                    return 0.05
-        self.last_action_result = "fix_type:no_match"
+
+                return 0.15 if action.new_value == issue["correct_value"] else 0.05
+
         return 0.02
 
     def _apply_remove_duplicate(self, action):
         for issue in self.original_issues:
             key = self._issue_key(issue)
+
             if (issue["type"] == "remove_duplicate"
-                    and issue["row_index"] == action.row_index
-                    and key not in self.fixed_issues):
+                and issue["row_index"] == action.row_index
+                and key not in self.fixed_issues):
+
                 try:
                     self.table.pop(action.row_index)
-                except IndexError:
+                except:
                     return 0.02
-                for other in self.original_issues:
-                    if other["row_index"] is not None and other["row_index"] > action.row_index:
-                        other["row_index"] -= 1
+
                 self.fixed_issues.add(key)
-                self.last_action_result = f"remove_duplicate:correct:{action.row_index}"
                 return 0.15
-        self.last_action_result = "remove_duplicate:no_match"
+
         return 0.02
 
     def _apply_fix_value(self, action):
         for issue in self.original_issues:
             key = self._issue_key(issue)
+
             if (issue["type"] == "fix_value"
-                    and issue["row_index"] == action.row_index
-                    and issue["column"] == action.column
-                    and key not in self.fixed_issues):
+                and issue["row_index"] == action.row_index
+                and issue["column"] == action.column
+                and key not in self.fixed_issues):
+
                 try:
                     self.table[action.row_index][action.column] = action.new_value
-                except (IndexError, KeyError):
+                except:
                     return 0.02
+
                 self.fixed_issues.add(key)
-                if action.new_value == issue["correct_value"]:
-                    self.last_action_result = f"fix_value:correct:{action.column}"
-                    return 0.15
-                else:
-                    self.last_action_result = f"fix_value:partial:{action.column}"
-                    return 0.05
-        self.last_action_result = "fix_value:no_match"
+
+                return 0.15 if action.new_value == issue["correct_value"] else 0.05
+
         return 0.02
